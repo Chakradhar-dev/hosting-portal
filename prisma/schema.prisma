@@ -1,0 +1,161 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id              String           @id @default(cuid())
+  name            String
+  email           String           @unique
+  password        String
+  role            String           @default("CLIENT") // "CLIENT" or "ADMIN"
+  company         String?
+  phone           String?
+  address         String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  hostingAccounts HostingAccount[]
+  invoices        Invoice[]
+  tickets         Ticket[]
+}
+
+model Server {
+  id              String           @id @default(cuid())
+  name            String
+  hostname        String
+  ip              String
+  port            Int              @default(2087)
+  username        String           @default("root")
+  apiToken        String
+  nameserver1     String?
+  nameserver2     String?
+  useSsl          Boolean          @default(true)
+  active          Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  packages        Package[]
+  hostingAccounts HostingAccount[]
+}
+
+model Package {
+  id               String           @id @default(cuid())
+  serverId         String?
+  server           Server?          @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  name             String
+  whmPackageName   String
+  description      String?
+  priceMonthly     Float            @default(0.0)
+  priceYearly      Float            @default(0.0)
+  diskQuotaMb      Int              @default(5120) // in MB (5GB)
+  bandwidthQuotaMb Int              @default(51200) // in MB (50GB)
+  maxEmailAccounts Int              @default(10)
+  maxDatabases     Int              @default(5)
+  maxSubdomains    Int              @default(5)
+  featured         Boolean          @default(false)
+  active           Boolean          @default(true)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  hostingAccounts  HostingAccount[]
+}
+
+model HostingAccount {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  serverId        String
+  server          Server    @relation(fields: [serverId], references: [id])
+  packageId       String
+  package         Package   @relation(fields: [packageId], references: [id])
+  domain          String
+  cpanelUsername  String
+  cpanelPassword  String?
+  status          String    @default("PENDING") // PENDING, ACTIVE, SUSPENDED, TERMINATED
+  suspendReason   String?
+  billingCycle    String    @default("MONTHLY") // MONTHLY, YEARLY
+  amount          Float     @default(0.0)
+  nextDueDate     DateTime
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  invoices        Invoice[]
+  wordpressSites  WordpressInstallation[]
+  builderProjects WebsiteBuilderProject[]
+}
+
+model WordpressInstallation {
+  id               String         @id @default(cuid())
+  hostingAccountId String
+  hostingAccount   HostingAccount @relation(fields: [hostingAccountId], references: [id], onDelete: Cascade)
+  siteTitle        String         @default("My WordPress Site")
+  siteUrl          String
+  path             String         @default("/")
+  adminUser        String         @default("admin")
+  adminEmail       String
+  version          String         @default("6.7.1")
+  dbName           String
+  dbUser           String
+  maintenanceMode  Boolean        @default(false)
+  autoUpdate       Boolean        @default(true)
+  pluginsCount     Int            @default(4)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
+
+model Invoice {
+  id               String          @id @default(cuid())
+  userId           String
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hostingAccountId String?
+  hostingAccount   HostingAccount? @relation(fields: [hostingAccountId], references: [id], onDelete: SetNull)
+  invoiceNumber    String          @unique
+  title            String
+  amount           Float
+  status           String          @default("UNPAID") // UNPAID, PAID, CANCELLED
+  dueDate          DateTime
+  paidAt           DateTime?
+  paymentMethod    String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+model Ticket {
+  id           String          @id @default(cuid())
+  userId       String
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticketNumber String          @unique
+  subject      String
+  department   String          @default("Technical Support")
+  priority     String          @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  status       String          @default("OPEN") // OPEN, IN_PROGRESS, ANSWERED, CLOSED
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  messages     TicketMessage[]
+}
+
+model TicketMessage {
+  id         String   @id @default(cuid())
+  ticketId   String
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderId   String
+  senderName String
+  senderRole String   @default("CLIENT") // CLIENT or ADMIN
+  message    String
+  createdAt  DateTime @default(now())
+}
+
+model WebsiteBuilderProject {
+  id               String         @id @default(cuid())
+  hostingAccountId String
+  hostingAccount   HostingAccount @relation(fields: [hostingAccountId], references: [id], onDelete: Cascade)
+  siteTitle        String         @default("My Business Website")
+  template         String         @default("agency") // "agency", "portfolio", "saas", "restaurant", "store"
+  status           String         @default("DRAFT") // "DRAFT", "PUBLISHED"
+  publishedUrl     String?
+  config           String         // JSON storing customized headlines, hero, features, themeColor, etc.
+  lastPublishedAt  DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
