@@ -1,9 +1,25 @@
 // Production Node.js server entry point for cPanel / CloudLinux Passenger
+if (typeof PhusionPassenger !== 'undefined') {
+  PhusionPassenger.configure({ autoInstall: false });
+}
+
 const { createServer } = require('http');
 const { parse } = require('url');
 const next = require('next');
 const fs = require('fs');
 const path = require('path');
+
+// Error diagnostic logger
+function logError(label, err) {
+  const errMsg = `[${new Date().toISOString()}] ${label}: ${err?.stack || err?.message || err}\n`;
+  console.error(errMsg);
+  try {
+    fs.appendFileSync(path.join(__dirname, 'startup_error.log'), errMsg);
+  } catch (_) {}
+}
+
+process.on('uncaughtException', (err) => logError('uncaughtException', err));
+process.on('unhandledRejection', (reason) => logError('unhandledRejection', reason));
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'production';
 
@@ -15,7 +31,7 @@ if (!fs.existsSync(envPath) && fs.existsSync(envExamplePath)) {
     fs.copyFileSync(envExamplePath, envPath);
     console.log('[cPanel Boot] Created .env from .env.example');
   } catch (e) {
-    console.error('[cPanel Boot] Failed to copy .env.example:', e.message);
+    logError('Copy .env.example', e);
   }
 }
 
@@ -27,19 +43,20 @@ if (!fs.existsSync(dbPath) && fs.existsSync(seedDbPath)) {
     fs.copyFileSync(seedDbPath, dbPath);
     console.log('[cPanel Boot] Restored pre-configured prisma/dev.db');
   } catch (e) {
-    console.error('[cPanel Boot] Failed to restore seed.db:', e.message);
+    logError('Restore seed.db', e);
   }
 }
 
-const dev = process.env.NODE_ENV !== 'production';
-const hostname = '0.0.0.0';
-// cPanel / Phusion Passenger passes port through process.env.PORT
-const port = parseInt(process.env.PORT, 10) || 3000;
+// Ensure Prisma always resolves absolute path to dev.db regardless of working directory
+process.env.DATABASE_URL = `file:${path.resolve(__dirname, 'prisma', 'dev.db')}`;
 
-const app = next({ dev, hostname, port });
+const dev = process.env.NODE_ENV !== 'production';
+const port = process.env.PORT || 3000;
+
+const app = next({ dev, dir: __dirname });
 const handle = app.getRequestHandler();
 
-console.log(`[Hosting Portal] Starting server in ${process.env.NODE_ENV} mode on port ${port}...`);
+console.log(`[Hosting Portal] Preparing Next.js in ${process.env.NODE_ENV} mode...`);
 
 app.prepare().then(() => {
   const server = createServer(async (req, res) => {
@@ -47,17 +64,25 @@ app.prepare().then(() => {
       const parsedUrl = parse(req.url, true);
       await handle(req, res, parsedUrl);
     } catch (err) {
-      console.error('[Server Error]', req.url, err);
+      logError('Request Handler Error', err);
       res.statusCode = 500;
       res.end('Internal Server Error');
     }
   });
 
-  server.listen(port, (err) => {
-    if (err) throw err;
-    console.log(`[Hosting Portal] Live and listening on port ${port}`);
-  });
+  if (typeof PhusionPassenger !== 'undefined') {
+    // Under Phusion Passenger, listen to passenger pipe
+    server.listen('passenger', () => {
+      console.log('[Hosting Portal] Bound to Phusion Passenger socket successfully');
+    });
+  } else {
+    // Normal TCP listen for local development or direct Node execution
+    server.listen(port, (err) => {
+      if (err) throw err;
+      console.log(`[Hosting Portal] Live and listening on port ${port}`);
+    });
+  }
 }).catch((err) => {
-  console.error('[Hosting Portal Fatal Startup Error]', err);
+  logError('Next.js app.prepare Fatal Error', err);
   process.exit(1);
 });
